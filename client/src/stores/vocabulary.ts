@@ -2,7 +2,15 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { hskWords, hskWordsByLevel, HSK_LEVELS } from '../data/hsk'
 
-import type { HskWord } from '../types'
+import type {
+  HskWord,
+  LearnerVocabularyProfile,
+  StudyMode,
+  VocabularyLevelBucket,
+} from '../types'
+
+const MAX_PARTIAL_WORDS_PER_LEVEL = 40
+const MAX_CANDIDATE_WORDS_PER_LEVEL = 60
 
 function loadLearnedIds(): Set<string> {
   try {
@@ -16,22 +24,46 @@ function loadLearnedIds(): Set<string> {
   }
 }
 
+function sampleWords(words: HskWord[], limit: number): string[] {
+  if (words.length <= limit) {
+    return words.map((word) => word.simplified)
+  }
+
+  const shuffled = [...words]
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+
+  return shuffled.slice(0, limit).map((word) => word.simplified)
+}
+
+function toBucket(
+  level: number,
+  words: HskWord[],
+  limit: number,
+): VocabularyLevelBucket {
+  return {
+    level,
+    count: words.length,
+    words: sampleWords(words, limit),
+  }
+}
+
 export const useVocabularyStore = defineStore('vocabulary', () => {
   const learnedWordIds = ref<Set<string>>(loadLearnedIds())
 
   const wordMap = new Map<string, HskWord>(hskWords.map((w) => [w.id, w]))
   const simplifiedToWord = new Map<string, HskWord>(
-    hskWords.map((w) => [w.simplified, w])
+    hskWords.map((w) => [w.simplified, w]),
   )
 
   function _persist() {
     localStorage.setItem(
       'learnedWordIds',
-      JSON.stringify([...learnedWordIds.value])
+      JSON.stringify([...learnedWordIds.value]),
     )
   }
-
-  // --- Getters ---
 
   const learnedWords = computed<HskWord[]>(() => {
     const result: HskWord[] = []
@@ -74,20 +106,76 @@ export const useVocabularyStore = defineStore('vocabulary', () => {
     return set
   })
 
-  const effectiveHskLevel = computed<number>(() => {
+  const fullyLearnedThroughLevel = computed<number>(() => {
     let highest = 0
+
     for (const { level } of HSK_LEVELS) {
       const total = hskWordsByLevel[level]?.length ?? 0
-      if (total === 0) continue
       const learned = learnedCountByLevel.value[level] ?? 0
-      if (learned / total > 0.5) {
+
+      if (total > 0 && learned === total) {
         highest = level
+        continue
       }
+
+      break
     }
+
     return highest
   })
 
-  // --- Actions ---
+  const frontierLevel = computed<number | null>(() => {
+    for (const { level } of HSK_LEVELS) {
+      const total = hskWordsByLevel[level]?.length ?? 0
+      const learned = learnedCountByLevel.value[level] ?? 0
+
+      if (total > 0 && learned < total) {
+        return level
+      }
+    }
+
+    return null
+  })
+
+  function buildLearnerProfile(studyMode: StudyMode): LearnerVocabularyProfile {
+    const partialKnownWords: VocabularyLevelBucket[] = []
+
+    for (const { level } of HSK_LEVELS) {
+      if (level <= fullyLearnedThroughLevel.value) continue
+
+      const words = learnedByLevel.value[level] ?? []
+      if (words.length === 0) continue
+
+      partialKnownWords.push(
+        toBucket(level, words, MAX_PARTIAL_WORDS_PER_LEVEL),
+      )
+    }
+
+    const candidateNewWords: VocabularyLevelBucket[] = []
+    const maxCandidateLevels = studyMode === 'review' ? 1 : 2
+
+    for (const { level } of HSK_LEVELS) {
+      const words = hskWordsByLevel[level] ?? []
+      const unknownWords = words.filter((word) => !learnedWordIds.value.has(word.id))
+
+      if (unknownWords.length === 0) continue
+
+      candidateNewWords.push(
+        toBucket(level, unknownWords, MAX_CANDIDATE_WORDS_PER_LEVEL),
+      )
+
+      if (candidateNewWords.length >= maxCandidateLevels) {
+        break
+      }
+    }
+
+    return {
+      fullyLearnedThroughLevel: fullyLearnedThroughLevel.value,
+      knownWordCount: totalLearnedCount.value,
+      partialKnownWords,
+      candidateNewWords,
+    }
+  }
 
   function toggleWord(wordId: string) {
     const next = new Set(learnedWordIds.value)
@@ -153,7 +241,9 @@ export const useVocabularyStore = defineStore('vocabulary', () => {
     totalLearnedCount,
     totalWordCount,
     knownSimplified,
-    effectiveHskLevel,
+    fullyLearnedThroughLevel,
+    frontierLevel,
+    buildLearnerProfile,
     toggleWord,
     markWordLearned,
     bulkMarkLevel,

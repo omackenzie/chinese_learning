@@ -5,7 +5,8 @@ import ParagraphDisplay from './ParagraphDisplay.vue'
 import TranslationCheck from './TranslationCheck.vue'
 import { useVocabularyStore } from '../stores/vocabulary'
 import { generateParagraph } from '../api/generate'
-import type { Difficulty } from '../types'
+
+import type { GenerateParagraphRequest } from '../types'
 
 const vocabularyStore = useVocabularyStore()
 
@@ -17,7 +18,7 @@ const errorMessage = ref('')
 
 const SEPARATOR = '---NEW_WORDS---'
 
-async function handleGenerate(difficulty: Difficulty) {
+async function handleGenerate(config: GenerateParagraphRequest) {
   generatedText.value = ''
   newWords.value = []
   isGenerating.value = true
@@ -27,15 +28,11 @@ async function handleGenerate(difficulty: Difficulty) {
   let fullResponse = ''
 
   try {
-    const stream = generateParagraph({
-      difficulty,
-      knownHskLevel: vocabularyStore.effectiveHskLevel,
-    })
+    const stream = generateParagraph(config)
 
     for await (const token of stream) {
       fullResponse += token
 
-      // Display only the Chinese part (before the separator)
       const separatorIdx = fullResponse.indexOf(SEPARATOR)
       if (separatorIdx === -1) {
         generatedText.value = fullResponse
@@ -44,14 +41,12 @@ async function handleGenerate(difficulty: Difficulty) {
       }
     }
 
-    // Parse new words from after the separator
     const separatorIdx = fullResponse.indexOf(SEPARATOR)
     if (separatorIdx !== -1) {
       const jsonStr = fullResponse.slice(separatorIdx + SEPARATOR.length).trim()
       try {
         newWords.value = JSON.parse(jsonStr)
       } catch {
-        // If JSON parsing fails, try to find a JSON array in the remaining text
         const match = jsonStr.match(/\[[\s\S]*\]/)
         if (match) {
           try {
@@ -83,13 +78,11 @@ function handleWordLearned(simplified: string) {
   <div class="max-w-4xl mx-auto p-6 space-y-8">
     <h2 class="text-2xl font-bold text-gray-900">Practice</h2>
 
-    <!-- Generate Form -->
     <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-4">Configure</h3>
       <GenerateForm :loading="isGenerating" @generate="handleGenerate" />
     </div>
 
-    <!-- Error Alert -->
     <div
       v-if="errorMessage"
       class="rounded-xl border border-red-200 bg-red-50 p-4 flex items-start gap-3"
@@ -103,14 +96,12 @@ function handleWordLearned(simplified: string) {
       </div>
     </div>
 
-    <!-- Paragraph Display -->
     <ParagraphDisplay
       :text="generatedText"
       :new-words="newWords"
       :loading="isGenerating"
     />
 
-    <!-- Translation Check -->
     <div
       v-if="showTranslation && generatedText"
       class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"

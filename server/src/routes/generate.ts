@@ -1,16 +1,18 @@
 import { Router, type Request, type Response } from 'express'
 import { buildGeneratePrompt, buildTranslatePrompt } from '../prompts.js'
-import { pickRandomTopic, difficultyToParams, type Difficulty } from '../contentTopics.js'
+import {
+  isContentStyle,
+  isParagraphLength,
+  isStudyMode,
+  pickRandomTopic,
+  studyModeToParams,
+} from '../contentTopics.js'
+import type { GenerateBody, LearnerVocabularyProfile, VocabularyLevelBucket } from '../generationTypes.js'
 
 const router = Router()
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:9b'
-
-interface GenerateBody {
-  difficulty: Difficulty
-  knownHskLevel: number
-}
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:4b'
 
 interface TranslateBody {
   chinese: string
@@ -42,7 +44,7 @@ async function fetchOllamaStream(system: string, user: string) {
 
 async function streamResponseBody(
   ollamaBody: ReadableStream<Uint8Array>,
-  res: Response
+  res: Response,
 ) {
   const reader = ollamaBody.getReader()
   const decoder = new TextDecoder()
@@ -98,7 +100,7 @@ async function handleOllamaRequest(system: string, user: string, res: Response) 
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Unknown error'
     res.status(503).json({
-      error: `Could not connect to Ollama. Is it running at ${OLLAMA_BASE_URL}? (${detail})`
+      error: `Could not connect to Ollama. Is it running at ${OLLAMA_BASE_URL}? (${detail})`,
     })
     return
   }
@@ -106,7 +108,7 @@ async function handleOllamaRequest(system: string, user: string, res: Response) 
   if (!ollamaRes.ok) {
     const errText = await ollamaRes.text().catch(() => 'Unknown error')
     res.status(502).json({
-      error: `Ollama returned an error: ${ollamaRes.status} — ${errText}`
+      error: `Ollama returned an error: ${ollamaRes.status} — ${errText}`,
     })
     return
   }
@@ -122,23 +124,66 @@ async function handleOllamaRequest(system: string, user: string, res: Response) 
   res.end()
 }
 
-router.post('/generate', async (req: Request, res: Response) => {
-  const body = req.body as GenerateBody
+function isVocabularyLevelBucket(value: unknown): value is VocabularyLevelBucket {
+  if (!value || typeof value !== 'object') return false
 
-  if (!body.difficulty || body.knownHskLevel === undefined || body.knownHskLevel === null) {
-    res.status(400).json({ error: 'Missing required fields: difficulty, knownHskLevel' })
+  const bucket = value as Record<string, unknown>
+  return Number.isInteger(bucket.level)
+    && Number.isInteger(bucket.count)
+    && Array.isArray(bucket.words)
+    && bucket.words.every((word) => typeof word === 'string')
+}
+
+function isLearnerVocabularyProfile(value: unknown): value is LearnerVocabularyProfile {
+  if (!value || typeof value !== 'object') return false
+
+  const profile = value as Record<string, unknown>
+  return Number.isInteger(profile.fullyLearnedThroughLevel)
+    && Number.isInteger(profile.knownWordCount)
+    && Array.isArray(profile.partialKnownWords)
+    && profile.partialKnownWords.every(isVocabularyLevelBucket)
+    && Array.isArray(profile.candidateNewWords)
+    && profile.candidateNewWords.every(isVocabularyLevelBucket)
+}
+
+router.post('/generate', async (req: Request, res: Response) => {
+  const body = req.body as Partial<GenerateBody>
+
+  if (
+    !isParagraphLength(body.paragraphLength)
+    || !isStudyMode(body.studyMode)
+    || (body.preferredStyle !== 'auto' && !isContentStyle(body.preferredStyle))
+    || (body.topicHint !== undefined && typeof body.topicHint !== 'string')
+    || !isLearnerVocabularyProfile(body.learnerProfile)
+  ) {
+    res.status(400).json({
+      error: 'Missing or invalid required fields: paragraphLength, studyMode, preferredStyle, learnerProfile',
+    })
     return
   }
 
-  const { topic, style } = pickRandomTopic(body.difficulty)
-  const { newWordCount, paragraphLength } = difficultyToParams(body.difficulty)
+  const { topic, style } = pickRandomTopic({
+    paragraphLength: body.paragraphLength,
+    preferredStyle: body.preferredStyle,
+    topicHint: body.topicHint,
+  })
+  const { newWordCount, paragraphLength } = studyModeToParams(
+    body.studyMode,
+    body.paragraphLength,
+  )
+  const totalCandidateWords = body.learnerProfile.candidateNewWords.reduce(
+    (sum, bucket) => sum + bucket.words.length,
+    0,
+  )
+  const cappedNewWordCount = Math.min(newWordCount, totalCandidateWords)
 
   const { system, user } = buildGeneratePrompt({
     style,
     sourceContent: topic,
-    newWordCount,
+    newWordCount: cappedNewWordCount,
     paragraphLength,
-    knownHskLevel: body.knownHskLevel,
+    studyMode: body.studyMode,
+    learnerProfile: body.learnerProfile,
   })
 
   await handleOllamaRequest(system, user, res)

@@ -1,4 +1,4 @@
-type ContentStyle =
+export type ContentStyle =
   | 'conversation'
   | 'text_messages'
   | 'social_media'
@@ -7,13 +7,25 @@ type ContentStyle =
   | 'diary_entry'
   | 'email'
 
+export type ParagraphLength = 'short' | 'medium' | 'long'
+
+export type StudyMode = 'review' | 'balanced' | 'stretch'
+
 export interface ContentTopic {
   topic: string
   style: ContentStyle
 }
 
-// Simple, casual styles suited to easy difficulty
-const easyTopics: ContentTopic[] = [
+interface TopicSelectionOptions {
+  paragraphLength: ParagraphLength
+  preferredStyle: ContentStyle | 'auto'
+  topicHint?: string
+}
+
+const paragraphLengths = ['short', 'medium', 'long'] as const satisfies readonly ParagraphLength[]
+const studyModes = ['review', 'balanced', 'stretch'] as const satisfies readonly StudyMode[]
+
+const shortTopics: ContentTopic[] = [
   { topic: 'two friends deciding where to eat dinner', style: 'conversation' },
   { topic: 'a group chat planning a birthday party', style: 'text_messages' },
   { topic: 'asking a friend for restaurant recommendations', style: 'text_messages' },
@@ -30,8 +42,7 @@ const easyTopics: ContentTopic[] = [
   { topic: 'a text exchange about being late to meet a friend', style: 'text_messages' },
 ]
 
-// More complex styles suited to hard difficulty
-const hardTopics: ContentTopic[] = [
+const longTopics: ContentTopic[] = [
   { topic: 'a new high-speed rail line connecting two cities', style: 'news_article' },
   { topic: 'a traditional craft being revived by young artists', style: 'news_article' },
   { topic: 'the health benefits of drinking green tea regularly', style: 'news_article' },
@@ -48,7 +59,6 @@ const hardTopics: ContentTopic[] = [
   { topic: 'the last day at a job before moving on to something new', style: 'diary_entry' },
 ]
 
-// Mixed content suited to medium difficulty
 const mediumTopics: ContentTopic[] = [
   { topic: 'the significance of red lanterns during the Lantern Festival', style: 'news_article' },
   { topic: 'a morning commute through a busy city', style: 'short_story' },
@@ -66,35 +76,71 @@ const mediumTopics: ContentTopic[] = [
   { topic: 'recommending a book to a friend over text', style: 'text_messages' },
 ]
 
-export type Difficulty = 'easy' | 'medium' | 'hard'
-
-const topicsByDifficulty: Record<Difficulty, ContentTopic[]> = {
-  easy: easyTopics,
+const topicsByLength: Record<ParagraphLength, ContentTopic[]> = {
+  short: shortTopics,
   medium: mediumTopics,
-  hard: hardTopics,
+  long: longTopics,
 }
 
-export function pickRandomTopic(difficulty: Difficulty): ContentTopic {
-  const topics = topicsByDifficulty[difficulty]
-  return topics[Math.floor(Math.random() * topics.length)]
+const allTopics = [...shortTopics, ...mediumTopics, ...longTopics]
+
+const newWordTargets: Record<StudyMode, Record<ParagraphLength, number>> = {
+  review: { short: 1, medium: 2, long: 3 },
+  balanced: { short: 2, medium: 3, long: 5 },
+  stretch: { short: 3, medium: 5, long: 6 },
 }
 
-interface DifficultyParams {
-  newWordCount: number
-  paragraphLength: 'short' | 'medium' | 'long'
+function randomItem<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
 }
 
-function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min
+export function isParagraphLength(value: unknown): value is ParagraphLength {
+  return typeof value === 'string' && paragraphLengths.includes(value as ParagraphLength)
 }
 
-export function difficultyToParams(difficulty: Difficulty): DifficultyParams {
-  switch (difficulty) {
-    case 'easy':
-      return { newWordCount: randomInt(1, 2), paragraphLength: 'short' }
-    case 'medium':
-      return { newWordCount: randomInt(3, 5), paragraphLength: 'medium' }
-    case 'hard':
-      return { newWordCount: randomInt(5, 8), paragraphLength: 'long' }
+export function isStudyMode(value: unknown): value is StudyMode {
+  return typeof value === 'string' && studyModes.includes(value as StudyMode)
+}
+
+export function isContentStyle(value: unknown): value is ContentStyle {
+  return typeof value === 'string' && allTopics.some((topic) => topic.style === value)
+}
+
+export function pickRandomTopic(options: TopicSelectionOptions): ContentTopic {
+  const hint = typeof options.topicHint === 'string'
+    ? options.topicHint.trim()
+    : ''
+  const pool = topicsByLength[options.paragraphLength]
+
+  if (hint) {
+    const style = options.preferredStyle === 'auto'
+      ? randomItem(pool).style
+      : options.preferredStyle
+
+    return { topic: hint, style }
+  }
+
+  if (options.preferredStyle !== 'auto') {
+    const matchingLengthTopics = pool.filter((topic) => topic.style === options.preferredStyle)
+    if (matchingLengthTopics.length > 0) {
+      return randomItem(matchingLengthTopics)
+    }
+
+    const matchingTopics = allTopics.filter((topic) => topic.style === options.preferredStyle)
+    if (matchingTopics.length > 0) {
+      return randomItem(matchingTopics)
+    }
+  }
+
+  return randomItem(pool)
+}
+
+export function studyModeToParams(
+  studyMode: StudyMode,
+  paragraphLength: ParagraphLength,
+) {
+  return {
+    newWordCount: newWordTargets[studyMode][paragraphLength],
+    paragraphLength,
   }
 }

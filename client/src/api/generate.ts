@@ -1,4 +1,4 @@
-import type { Difficulty } from '../types'
+import type { GenerateParagraphRequest } from '../types'
 
 function parseSSEData(data: string): string | never {
   try {
@@ -12,7 +12,6 @@ function parseSSEData(data: string): string | never {
     return ''
   } catch (e) {
     if (e instanceof SyntaxError) {
-      // Not JSON — return raw text as fallback
       return data
     }
     throw e
@@ -67,7 +66,7 @@ async function parseErrorResponse(response: Response): Promise<string> {
 }
 
 export async function* generateParagraph(
-  params: { difficulty: Difficulty; knownHskLevel: number }
+  params: GenerateParagraphRequest,
 ): AsyncGenerator<string> {
   let response: Response
   try {
