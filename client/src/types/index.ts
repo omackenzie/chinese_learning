@@ -23,6 +23,7 @@ export type ContentStyle =
 export interface VocabularyLevelBucket {
   level: number
   count: number
+  isComplete: boolean
   words: string[]
 }
 
@@ -37,6 +38,7 @@ export interface GenerateParagraphRequest {
   paragraphLength: ParagraphLength
   studyMode: StudyMode
   learnerProfile: LearnerVocabularyProfile
+  forbiddenWords?: string[]
 }
 
 export interface NewWord {

@@ -8,6 +8,7 @@ interface GeneratePromptParams {
   paragraphLength: ParagraphLength
   studyMode: StudyMode
   learnerProfile: LearnerVocabularyProfile
+  forbiddenWords?: string[]
 }
 
 interface TranslationFeedbackPromptParams {
@@ -37,11 +38,15 @@ function formatLevelLabel(level: number): string {
 }
 
 function formatBucket(bucket: VocabularyLevelBucket): string {
-  const examples = bucket.words.length > 0
+  const listedWords = bucket.words.length > 0
     ? bucket.words.join('、')
     : 'none listed'
 
-  return `- ${formatLevelLabel(bucket.level)}: ${bucket.count} word(s); examples: ${examples}`
+  const scope = bucket.isComplete
+    ? 'exact listed words'
+    : 'listed words (truncated for prompt size)'
+
+  return `- ${formatLevelLabel(bucket.level)}: ${bucket.count} word(s); ${scope}: ${listedWords}`
 }
 
 function buildKnowledgeSummary(profile: LearnerVocabularyProfile): string {
@@ -51,11 +56,11 @@ function buildKnowledgeSummary(profile: LearnerVocabularyProfile): string {
 
   const partialLevels = profile.partialKnownWords.length > 0
     ? profile.partialKnownWords.map(formatBucket).join('\n')
-    : '- No extra higher-level words are marked as learned yet.'
+    : '- No extra words are marked as learned from incomplete higher levels.'
 
   return `${completedLevels}
 - Total learned words tracked: ${profile.knownWordCount}
-- Additional learned higher-level words:
+- For any level above the fully learned boundary, only the listed tracked words are allowed:
 ${partialLevels}`
 }
 
@@ -113,12 +118,16 @@ export function buildGeneratePrompt(params: GeneratePromptParams): {
     paragraphLength,
     studyMode,
     learnerProfile,
+    forbiddenWords,
   } = params
 
   const styleDesc = styleDescriptions[style]
   const length = lengthGuidance[paragraphLength]
   const knowledgeSummary = buildKnowledgeSummary(learnerProfile)
   const candidateSummary = buildCandidateSummary(learnerProfile)
+  const forbiddenWordSummary = forbiddenWords && forbiddenWords.length > 0
+    ? forbiddenWords.join('、')
+    : ''
   const studyModeRules = buildStudyModeRules(studyMode, learnerProfile.candidateNewWords)
     .map((rule) => `- ${rule}`)
     .join('\n')
@@ -142,10 +151,17 @@ Rules:
 - Write in simplified Chinese characters.
 - Use vocabulary primarily from the learner's known profile.
 ${newWordRule}
-- Outside the exact new words you introduce, avoid vocabulary that falls outside the learner's known profile.
+- Treat the listed words for incomplete levels as hard vocabulary limits, not examples.
+- Before writing, first choose the exact new words you will introduce.
+- Then write the passage using only:
+  1. any words from fully learned levels,
+  2. the tracked known words listed for incomplete levels,
+  3. the exact chosen new words.
+- Outside the exact chosen new words, do not use any other vocabulary from incomplete levels.
 - The content must be realistic and natural. Write something a real Chinese speaker would actually say or write in this format. Avoid textbook-style artificial sentences.
 - Do NOT include pinyin in the main text.
 - Keep grammar appropriate for the learner's comfort zone.
+${forbiddenWordSummary ? `- Do NOT use any of these previously rejected out-of-profile words: ${forbiddenWordSummary}` : ''}
 
 Output format (follow this exactly):
 1. Write the Chinese content.
@@ -166,6 +182,10 @@ Output nothing else after the JSON array.`
     userPrompt += ` Introduce exactly ${newWordCount} new word(s) from the allowed candidate-word lists.`
   } else {
     userPrompt += ' Do not introduce any new words.'
+  }
+
+  if (forbiddenWordSummary) {
+    userPrompt += ` Do not use these rejected words: ${forbiddenWordSummary}.`
   }
 
   return { system, user: userPrompt }

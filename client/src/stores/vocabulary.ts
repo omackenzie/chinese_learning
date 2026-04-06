@@ -9,8 +9,8 @@ import type {
   VocabularyLevelBucket,
 } from '../types'
 
-const MAX_PARTIAL_WORDS_PER_LEVEL = 40
-const MAX_CANDIDATE_WORDS_PER_LEVEL = 60
+const MAX_PARTIAL_WORDS_PER_LEVEL = 1500
+const MAX_CANDIDATE_WORDS_PER_LEVEL = 1500
 const WORD_LIST_EXPORT_VERSION = 1
 
 type ImportMode = 'merge' | 'replace'
@@ -48,18 +48,18 @@ function loadLearnedIds(): Set<string> {
   }
 }
 
-function sampleWords(words: HskWord[], limit: number): string[] {
-  if (words.length <= limit) {
-    return words.map((word) => word.simplified)
-  }
+function selectWordsForPrompt(words: HskWord[], limit: number): {
+  words: string[]
+  isComplete: boolean
+} {
+  const simplifiedWords = words
+    .map((word) => word.simplified)
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
 
-  const shuffled = [...words]
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  return {
+    words: simplifiedWords.slice(0, limit),
+    isComplete: simplifiedWords.length <= limit,
   }
-
-  return shuffled.slice(0, limit).map((word) => word.simplified)
 }
 
 function toBucket(
@@ -67,10 +67,13 @@ function toBucket(
   words: HskWord[],
   limit: number,
 ): VocabularyLevelBucket {
+  const selected = selectWordsForPrompt(words, limit)
+
   return {
     level,
     count: words.length,
-    words: sampleWords(words, limit),
+    isComplete: selected.isComplete,
+    words: selected.words,
   }
 }
 

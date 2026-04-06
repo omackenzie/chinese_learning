@@ -194,6 +194,7 @@ function isVocabularyLevelBucket(value: unknown): value is VocabularyLevelBucket
   const bucket = value as Record<string, unknown>
   return Number.isInteger(bucket.level)
     && Number.isInteger(bucket.count)
+    && typeof bucket.isComplete === 'boolean'
     && Array.isArray(bucket.words)
     && bucket.words.every((word) => typeof word === 'string')
 }
@@ -217,9 +218,12 @@ router.post('/generate', async (req: Request, res: Response) => {
     !isParagraphLength(body.paragraphLength)
     || !isStudyMode(body.studyMode)
     || !isLearnerVocabularyProfile(body.learnerProfile)
+    || (body.forbiddenWords !== undefined
+      && (!Array.isArray(body.forbiddenWords)
+        || body.forbiddenWords.some((word) => typeof word !== 'string')))
   ) {
     res.status(400).json({
-      error: 'Missing or invalid required fields: paragraphLength, studyMode, learnerProfile',
+      error: 'Missing or invalid required fields: paragraphLength, studyMode, learnerProfile, forbiddenWords',
     })
     return
   }
@@ -244,6 +248,7 @@ router.post('/generate', async (req: Request, res: Response) => {
     paragraphLength,
     studyMode: body.studyMode,
     learnerProfile: body.learnerProfile,
+    forbiddenWords: body.forbiddenWords,
   })
 
   await handleOllamaRequest(system, user, res)
