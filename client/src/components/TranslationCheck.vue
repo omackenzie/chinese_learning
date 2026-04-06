@@ -1,20 +1,44 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { getTranslation } from '../api/generate'
+import { ref, watch } from 'vue'
+import { getTranslation, getTranslationFeedback } from '../api/generate'
+
+import type { NewWord, TranslationFeedback } from '../types'
 
 const props = defineProps<{
   chineseText: string
-  newWords: { simplified: string; pinyin: string; english: string }[]
+  newWords: NewWord[]
 }>()
 
-const emit = defineEmits<{ wordLearned: [simplified: string] }>()
+const emit = defineEmits<{
+  wordLearned: [simplified: string]
+  translationReviewed: [
+    payload: {
+      userTranslation: string
+      referenceTranslation: string
+      feedback: TranslationFeedback | null
+    },
+  ]
+}>()
 
 const userTranslation = ref('')
 const referenceTranslation = ref('')
 const isChecking = ref(false)
 const hasChecked = ref(false)
 const errorMessage = ref('')
+const feedback = ref<TranslationFeedback | null>(null)
 const learnedWords = ref<Set<string>>(new Set())
+
+function resetState() {
+  userTranslation.value = ''
+  referenceTranslation.value = ''
+  isChecking.value = false
+  hasChecked.value = false
+  errorMessage.value = ''
+  feedback.value = null
+  learnedWords.value = new Set()
+}
+
+watch(() => props.chineseText, resetState, { immediate: true })
 
 async function checkTranslation() {
   if (!userTranslation.value.trim()) return
@@ -23,11 +47,24 @@ async function checkTranslation() {
   hasChecked.value = true
   referenceTranslation.value = ''
   errorMessage.value = ''
+  feedback.value = null
 
   try {
     for await (const token of getTranslation(props.chineseText)) {
       referenceTranslation.value += token
     }
+
+    feedback.value = await getTranslationFeedback({
+      chinese: props.chineseText,
+      userTranslation: userTranslation.value.trim(),
+      newWords: props.newWords,
+    })
+
+    emit('translationReviewed', {
+      userTranslation: userTranslation.value.trim(),
+      referenceTranslation: referenceTranslation.value.trim(),
+      feedback: feedback.value,
+    })
   } catch (e) {
     hasChecked.value = false
     errorMessage.value = e instanceof Error
@@ -101,6 +138,44 @@ function markAsLearned(simplified: string) {
           {{ referenceTranslation }}
           <span v-if="isChecking" class="inline-block w-0.5 h-4 bg-red-700 animate-pulse ml-0.5 align-middle" />
         </p>
+      </div>
+    </div>
+
+    <div
+      v-if="feedback"
+      class="rounded-lg border border-amber-200 bg-amber-50 p-4"
+    >
+      <h4 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">Feedback</h4>
+      <p class="text-sm text-amber-900">{{ feedback.summary }}</p>
+
+      <div
+        v-if="feedback.strengths.length"
+        class="mt-4"
+      >
+        <h5 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">What worked</h5>
+        <ul class="space-y-1 text-sm text-amber-900 list-disc list-inside">
+          <li v-for="item in feedback.strengths" :key="item">{{ item }}</li>
+        </ul>
+      </div>
+
+      <div
+        v-if="feedback.improvements.length"
+        class="mt-4"
+      >
+        <h5 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">What to improve</h5>
+        <ul class="space-y-1 text-sm text-amber-900 list-disc list-inside">
+          <li v-for="item in feedback.improvements" :key="item">{{ item }}</li>
+        </ul>
+      </div>
+
+      <div
+        v-if="feedback.newWordNotes.length"
+        class="mt-4"
+      >
+        <h5 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">New word notes</h5>
+        <ul class="space-y-1 text-sm text-amber-900 list-disc list-inside">
+          <li v-for="item in feedback.newWordNotes" :key="item">{{ item }}</li>
+        </ul>
       </div>
     </div>
 

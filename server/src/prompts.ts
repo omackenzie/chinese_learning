@@ -10,6 +10,12 @@ interface GeneratePromptParams {
   learnerProfile: LearnerVocabularyProfile
 }
 
+interface TranslationFeedbackPromptParams {
+  chinese: string
+  userTranslation: string
+  newWords: { simplified: string; english: string }[]
+}
+
 const lengthGuidance: Record<ParagraphLength, string> = {
   short: '2-3 sentences',
   medium: '4-6 sentences',
@@ -172,6 +178,45 @@ export function buildTranslatePrompt(chinese: string): {
   const system = `You are a professional Chinese-to-English translator. Provide a natural, accurate English translation. Only output the translation — no explanations, notes, or additional commentary.`
 
   const user = `Translate the following Chinese text into natural English:\n\n${chinese}`
+
+  return { system, user }
+}
+
+export function buildTranslationFeedbackPrompt(params: TranslationFeedbackPromptParams): {
+  system: string
+  user: string
+} {
+  const newWordContext = params.newWords.length > 0
+    ? params.newWords
+      .map((word) => `${word.simplified} = ${word.english}`)
+      .join(', ')
+    : 'No highlighted new words.'
+
+  const system = `You are a concise Chinese-to-English translation tutor. Compare the learner's translation with the original Chinese. Be encouraging, specific, and practical.
+
+Return JSON only with this exact shape:
+{
+  "summary": "one short paragraph",
+  "strengths": ["short bullet", "short bullet"],
+  "improvements": ["short bullet", "short bullet"],
+  "newWordNotes": ["short bullet", "short bullet"]
+}
+
+Rules:
+- Keep each list to 0-3 items.
+- Focus on meaning, omissions, tone, and key vocabulary.
+- Do not be harsh or academic.
+- If the learner translation is acceptable but phrased differently, say so.
+- If there are no useful notes for a list, return an empty array.`
+
+  const user = `Original Chinese:
+${params.chinese}
+
+Learner translation:
+${params.userTranslation}
+
+Highlighted new words:
+${newWordContext}`
 
   return { system, user }
 }

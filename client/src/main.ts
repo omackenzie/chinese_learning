@@ -17,6 +17,11 @@ const router = createRouter({
       name: 'words',
       component: () => import('./components/WordList.vue'),
     },
+    {
+      path: '/history',
+      name: 'history',
+      component: () => import('./components/HistoryView.vue'),
+    },
   ],
 })
 

@@ -4,10 +4,8 @@ import { useVocabularyStore } from '../stores/vocabulary'
 import { HSK_LEVELS } from '../data/hsk'
 
 import type {
-  ContentStyle,
   GenerateParagraphRequest,
   ParagraphLength,
-  PreferredStyle,
   StudyMode,
 } from '../types'
 
@@ -19,8 +17,6 @@ const vocab = useVocabularyStore()
 
 const paragraphLength = ref<ParagraphLength>('medium')
 const studyMode = ref<StudyMode>('balanced')
-const preferredStyle = ref<PreferredStyle>('auto')
-const topicHint = ref('')
 
 const lengthOptions: {
   value: ParagraphLength
@@ -52,20 +48,6 @@ const studyModeOptions: {
     label: 'Stretch',
     description: 'A more challenging passage with richer vocabulary',
   },
-]
-
-const styleOptions: {
-  value: PreferredStyle
-  label: string
-}[] = [
-  { value: 'auto', label: 'Auto-select' },
-  { value: 'conversation', label: 'Conversation' },
-  { value: 'text_messages', label: 'Text messages' },
-  { value: 'social_media', label: 'Social media' },
-  { value: 'short_story', label: 'Short story' },
-  { value: 'news_article', label: 'News article' },
-  { value: 'diary_entry', label: 'Diary entry' },
-  { value: 'email', label: 'Email' },
 ]
 
 const targetNewWords = computed(() => {
@@ -108,8 +90,6 @@ function handleSubmit() {
   emit('generate', {
     paragraphLength: paragraphLength.value,
     studyMode: studyMode.value,
-    preferredStyle: preferredStyle.value,
-    topicHint: topicHint.value.trim(),
     learnerProfile: vocab.buildLearnerProfile(studyMode.value),
   })
 }
@@ -167,34 +147,6 @@ function handleSubmit() {
           </div>
         </label>
       </div>
-    </div>
-
-    <div class="grid gap-4 sm:grid-cols-2">
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1.5">Preferred style</span>
-        <select
-          v-model="preferredStyle"
-          class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-        >
-          <option
-            v-for="opt in styleOptions"
-            :key="opt.value"
-            :value="opt.value"
-          >
-            {{ opt.label }}
-          </option>
-        </select>
-      </label>
-
-      <label class="block">
-        <span class="block text-sm font-medium text-gray-700 mb-1.5">Topic hint</span>
-        <input
-          v-model="topicHint"
-          type="text"
-          placeholder="Optional, e.g. ordering food or moving to a new city"
-          class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm placeholder-gray-400 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-        />
-      </label>
     </div>
 
     <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

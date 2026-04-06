@@ -1,24 +1,68 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import GenerateForm from './GenerateForm.vue'
 import ParagraphDisplay from './ParagraphDisplay.vue'
 import TranslationCheck from './TranslationCheck.vue'
 import { useVocabularyStore } from '../stores/vocabulary'
+import { useGenerationHistoryStore } from '../stores/generationHistory'
 import { generateParagraph } from '../api/generate'
 
-import type { GenerateParagraphRequest } from '../types'
+import type { GenerateParagraphRequest, PracticeHistoryEntry, TranslationFeedback } from '../types'
 
 const vocabularyStore = useVocabularyStore()
+const historyStore = useGenerationHistoryStore()
+const route = useRoute()
+const router = useRouter()
 
 const generatedText = ref('')
-const newWords = ref<{ simplified: string; pinyin: string; english: string }[]>([])
+const newWords = ref<PracticeHistoryEntry['newWords']>([])
 const isGenerating = ref(false)
 const showTranslation = ref(false)
 const errorMessage = ref('')
+const activeHistoryEntryId = ref<string | null>(null)
 
 const SEPARATOR = '---NEW_WORDS---'
 
+const activeHistoryEntry = computed(() =>
+  activeHistoryEntryId.value ? historyStore.getEntry(activeHistoryEntryId.value) : null,
+)
+
+const reviewingSavedEntry = computed(() =>
+  typeof route.query.history === 'string' && activeHistoryEntry.value !== null,
+)
+
+function loadHistoryEntry(entryId: string) {
+  const entry = historyStore.getEntry(entryId)
+  if (!entry) {
+    errorMessage.value = 'Saved practice item not found.'
+    return
+  }
+
+  generatedText.value = entry.chinese
+  newWords.value = entry.newWords
+  isGenerating.value = false
+  showTranslation.value = true
+  errorMessage.value = ''
+  activeHistoryEntryId.value = entry.id
+}
+
+watch(
+  () => route.query.history,
+  (historyId) => {
+    if (typeof historyId === 'string') {
+      loadHistoryEntry(historyId)
+    }
+  },
+  { immediate: true },
+)
+
 async function handleGenerate(config: GenerateParagraphRequest) {
+  if (route.query.history) {
+    void router.replace({ name: 'practice' })
+  }
+
+  activeHistoryEntryId.value = null
   generatedText.value = ''
   newWords.value = []
   isGenerating.value = true
@@ -60,6 +104,14 @@ async function handleGenerate(config: GenerateParagraphRequest) {
 
     generatedText.value = generatedText.value.trim()
     showTranslation.value = true
+    activeHistoryEntryId.value = historyStore.saveGeneration(
+      {
+        paragraphLength: config.paragraphLength,
+        studyMode: config.studyMode,
+      },
+      generatedText.value,
+      newWords.value,
+    )
   } catch (e) {
     errorMessage.value = e instanceof Error
       ? e.message
@@ -72,11 +124,41 @@ async function handleGenerate(config: GenerateParagraphRequest) {
 function handleWordLearned(simplified: string) {
   vocabularyStore.markSimplifiedLearned(simplified)
 }
+
+function handleTranslationReviewed(payload: {
+  userTranslation: string
+  referenceTranslation: string
+  feedback: TranslationFeedback | null
+}) {
+  if (!activeHistoryEntryId.value) return
+
+  historyStore.addTranslationAttempt(activeHistoryEntryId.value, payload)
+}
 </script>
 
 <template>
   <div class="max-w-4xl mx-auto p-6 space-y-8">
     <h2 class="text-2xl font-bold text-gray-900">Practice</h2>
+
+    <div
+      v-if="reviewingSavedEntry"
+      class="rounded-xl border border-amber-200 bg-amber-50 p-4"
+    >
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-amber-700">Reviewing a saved passage</h3>
+          <p class="text-sm text-amber-900 mt-1">
+            Reopened from history on {{ new Date(activeHistoryEntry!.createdAt).toLocaleString() }}.
+          </p>
+        </div>
+        <router-link
+          to="/history"
+          class="text-sm font-medium text-amber-800 underline underline-offset-2"
+        >
+          Back to History
+        </router-link>
+      </div>
+    </div>
 
     <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-4">Configure</h3>
@@ -111,6 +193,7 @@ function handleWordLearned(simplified: string) {
         :chinese-text="generatedText"
         :new-words="newWords"
         @word-learned="handleWordLearned"
+        @translation-reviewed="handleTranslationReviewed"
       />
     </div>
   </div>

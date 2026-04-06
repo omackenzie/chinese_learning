@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from 'express'
-import { buildGeneratePrompt, buildTranslatePrompt } from '../prompts.js'
 import {
-  isContentStyle,
+  buildGeneratePrompt,
+  buildTranslatePrompt,
+  buildTranslationFeedbackPrompt,
+} from '../prompts.js'
+import {
   isParagraphLength,
   isStudyMode,
   pickRandomTopic,
@@ -18,6 +21,12 @@ interface TranslateBody {
   chinese: string
 }
 
+interface TranslationFeedbackBody {
+  chinese: string
+  userTranslation: string
+  newWords?: { simplified: string; english: string }[]
+}
+
 function setupSSE(res: Response) {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -25,7 +34,7 @@ function setupSSE(res: Response) {
   res.flushHeaders()
 }
 
-async function fetchOllamaStream(system: string, user: string) {
+async function fetchOllama(system: string, user: string, stream: boolean) {
   const url = `${OLLAMA_BASE_URL}/api/chat`
   return fetch(url, {
     method: 'POST',
@@ -36,7 +45,7 @@ async function fetchOllamaStream(system: string, user: string) {
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      stream: true,
+      stream,
       think: false,
     }),
   })
@@ -96,7 +105,7 @@ async function streamResponseBody(
 async function handleOllamaRequest(system: string, user: string, res: Response) {
   let ollamaRes: globalThis.Response
   try {
-    ollamaRes = await fetchOllamaStream(system, user)
+    ollamaRes = await fetchOllama(system, user, true)
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Unknown error'
     res.status(503).json({
@@ -122,6 +131,61 @@ async function handleOllamaRequest(system: string, user: string, res: Response) 
   await streamResponseBody(ollamaRes.body, res)
   res.write('data: [DONE]\n\n')
   res.end()
+}
+
+function isTranslationFeedbackBody(value: unknown): value is TranslationFeedbackBody {
+  if (!value || typeof value !== 'object') return false
+
+  const body = value as Record<string, unknown>
+  return typeof body.chinese === 'string'
+    && typeof body.userTranslation === 'string'
+    && (body.newWords === undefined
+      || (Array.isArray(body.newWords)
+        && body.newWords.every((word) =>
+          Boolean(word)
+          && typeof word === 'object'
+          && typeof (word as Record<string, unknown>).simplified === 'string'
+          && typeof (word as Record<string, unknown>).english === 'string',
+        )))
+}
+
+function extractJsonObject<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/)
+    if (!match) return null
+
+    try {
+      return JSON.parse(match[0]) as T
+    } catch {
+      return null
+    }
+  }
+}
+
+async function fetchOllamaText(system: string, user: string) {
+  let ollamaRes: globalThis.Response
+  try {
+    ollamaRes = await fetchOllama(system, user, false)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Unknown error'
+    throw new Error(`Could not connect to Ollama. Is it running at ${OLLAMA_BASE_URL}? (${detail})`)
+  }
+
+  if (!ollamaRes.ok) {
+    const errText = await ollamaRes.text().catch(() => 'Unknown error')
+    throw new Error(`Ollama returned an error: ${ollamaRes.status} — ${errText}`)
+  }
+
+  const data = await ollamaRes.json() as { message?: { content?: unknown } }
+  const content = data.message?.content
+
+  if (typeof content !== 'string') {
+    throw new Error('Ollama returned an invalid non-stream response')
+  }
+
+  return content
 }
 
 function isVocabularyLevelBucket(value: unknown): value is VocabularyLevelBucket {
@@ -152,20 +216,16 @@ router.post('/generate', async (req: Request, res: Response) => {
   if (
     !isParagraphLength(body.paragraphLength)
     || !isStudyMode(body.studyMode)
-    || (body.preferredStyle !== 'auto' && !isContentStyle(body.preferredStyle))
-    || (body.topicHint !== undefined && typeof body.topicHint !== 'string')
     || !isLearnerVocabularyProfile(body.learnerProfile)
   ) {
     res.status(400).json({
-      error: 'Missing or invalid required fields: paragraphLength, studyMode, preferredStyle, learnerProfile',
+      error: 'Missing or invalid required fields: paragraphLength, studyMode, learnerProfile',
     })
     return
   }
 
   const { topic, style } = pickRandomTopic({
     paragraphLength: body.paragraphLength,
-    preferredStyle: body.preferredStyle,
-    topicHint: body.topicHint,
   })
   const { newWordCount, paragraphLength } = studyModeToParams(
     body.studyMode,
@@ -200,6 +260,55 @@ router.post('/translate', async (req: Request, res: Response) => {
   const { system, user } = buildTranslatePrompt(body.chinese)
 
   await handleOllamaRequest(system, user, res)
+})
+
+router.post('/translation-feedback', async (req: Request, res: Response) => {
+  if (!isTranslationFeedbackBody(req.body)) {
+    res.status(400).json({
+      error: 'Missing or invalid required fields: chinese, userTranslation, newWords',
+    })
+    return
+  }
+
+  const { system, user } = buildTranslationFeedbackPrompt({
+    chinese: req.body.chinese,
+    userTranslation: req.body.userTranslation,
+    newWords: req.body.newWords ?? [],
+  })
+
+  let content: string
+  try {
+    content = await fetchOllamaText(system, user)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Translation feedback failed'
+    res.status(502).json({ error: message })
+    return
+  }
+
+  const parsed = extractJsonObject<{
+    summary?: unknown
+    strengths?: unknown
+    improvements?: unknown
+    newWordNotes?: unknown
+  }>(content)
+
+  if (!parsed) {
+    res.status(502).json({ error: 'Ollama returned invalid structured translation feedback.' })
+    return
+  }
+
+  res.json({
+    summary: typeof parsed.summary === 'string' ? parsed.summary : 'No summary available.',
+    strengths: Array.isArray(parsed.strengths)
+      ? parsed.strengths.filter((item): item is string => typeof item === 'string')
+      : [],
+    improvements: Array.isArray(parsed.improvements)
+      ? parsed.improvements.filter((item): item is string => typeof item === 'string')
+      : [],
+    newWordNotes: Array.isArray(parsed.newWordNotes)
+      ? parsed.newWordNotes.filter((item): item is string => typeof item === 'string')
+      : [],
+  })
 })
 
 export default router

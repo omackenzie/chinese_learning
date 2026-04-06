@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { hskWords, hskWordsByLevel, HSK_LEVELS } from '../data/hsk'
 
 import type {
@@ -11,6 +11,30 @@ import type {
 
 const MAX_PARTIAL_WORDS_PER_LEVEL = 40
 const MAX_CANDIDATE_WORDS_PER_LEVEL = 60
+const WORD_LIST_EXPORT_VERSION = 1
+
+type ImportMode = 'merge' | 'replace'
+
+interface ExportedWordList {
+  version: number
+  exportedAt: string
+  learnedWordIds: string[]
+  words: Array<{
+    id: string
+    simplified: string
+    pinyin: string
+    english: string
+    level: number
+  }>
+}
+
+interface WordListImportSummary {
+  mode: ImportMode
+  importedCount: number
+  totalAfterImport: number
+  invalidCount: number
+  duplicateCount: number
+}
 
 function loadLearnedIds(): Set<string> {
   try {
@@ -48,6 +72,23 @@ function toBucket(
     count: words.length,
     words: sampleWords(words, limit),
   }
+}
+
+function parseImportedIds(input: unknown): string[] {
+  if (Array.isArray(input)) {
+    return input.filter((id): id is string => typeof id === 'string')
+  }
+
+  if (!input || typeof input !== 'object') {
+    throw new Error('Import file must be a JSON array or an object with learnedWordIds.')
+  }
+
+  const payload = input as { learnedWordIds?: unknown }
+  if (!Array.isArray(payload.learnedWordIds)) {
+    throw new Error('Import file is missing learnedWordIds.')
+  }
+
+  return payload.learnedWordIds.filter((id): id is string => typeof id === 'string')
 }
 
 export const useVocabularyStore = defineStore('vocabulary', () => {
@@ -233,6 +274,89 @@ export const useVocabularyStore = defineStore('vocabulary', () => {
     if (word) markWordLearned(word.id)
   }
 
+  function exportWordList(): ExportedWordList {
+    const learned = learnedWords.value
+      .slice()
+      .sort((a, b) => (
+        a.level - b.level
+        || a.simplified.localeCompare(b.simplified, 'zh-Hans-CN')
+      ))
+
+    return {
+      version: WORD_LIST_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      learnedWordIds: learned.map((word) => word.id),
+      words: learned.map((word) => ({
+        id: word.id,
+        simplified: word.simplified,
+        pinyin: word.pinyin,
+        english: word.english,
+        level: word.level,
+      })),
+    }
+  }
+
+  function importWordList(
+    payload: unknown,
+    mode: ImportMode,
+  ): WordListImportSummary {
+    const importedIds = parseImportedIds(payload)
+
+    if (importedIds.length === 0) {
+      throw new Error('Import file does not contain any learned word IDs.')
+    }
+
+    const validUniqueIds: string[] = []
+    const seen = new Set<string>()
+    let invalidCount = 0
+    let duplicateCount = 0
+
+    for (const id of importedIds) {
+      if (!wordMap.has(id)) {
+        invalidCount += 1
+        continue
+      }
+
+      if (seen.has(id)) {
+        duplicateCount += 1
+        continue
+      }
+
+      seen.add(id)
+      validUniqueIds.push(id)
+    }
+
+    if (validUniqueIds.length === 0) {
+      throw new Error('Import file does not contain any valid word IDs for this app.')
+    }
+
+    const next = mode === 'replace'
+      ? new Set<string>()
+      : new Set(learnedWordIds.value)
+
+    let importedCount = 0
+    for (const id of validUniqueIds) {
+      if (next.has(id)) {
+        duplicateCount += 1
+        continue
+      }
+
+      next.add(id)
+      importedCount += 1
+    }
+
+    learnedWordIds.value = next
+    _persist()
+
+    return {
+      mode,
+      importedCount,
+      totalAfterImport: next.size,
+      invalidCount,
+      duplicateCount,
+    }
+  }
+
   return {
     learnedWordIds,
     learnedWords,
@@ -251,5 +375,11 @@ export const useVocabularyStore = defineStore('vocabulary', () => {
     isWordLearned,
     isSimplifiedLearned,
     markSimplifiedLearned,
+    exportWordList,
+    importWordList,
   }
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useVocabularyStore, import.meta.hot))
+}

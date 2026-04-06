@@ -1,4 +1,4 @@
-import type { ContentStyle, ParagraphLength, StudyMode } from './contentTopics.js'
+import type { ParagraphLength, StudyMode } from './contentTopics.js'
 
 export interface VocabularyLevelBucket {
   level: number
@@ -16,7 +16,5 @@ export interface LearnerVocabularyProfile {
 export interface GenerateBody {
   paragraphLength: ParagraphLength
   studyMode: StudyMode
-  preferredStyle: ContentStyle | 'auto'
-  topicHint?: string
   learnerProfile: LearnerVocabularyProfile
 }

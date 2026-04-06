@@ -20,8 +20,6 @@ export type ContentStyle =
   | 'diary_entry'
   | 'email'
 
-export type PreferredStyle = ContentStyle | 'auto'
-
 export interface VocabularyLevelBucket {
   level: number
   count: number
@@ -38,16 +36,53 @@ export interface LearnerVocabularyProfile {
 export interface GenerateParagraphRequest {
   paragraphLength: ParagraphLength
   studyMode: StudyMode
-  preferredStyle: PreferredStyle
-  topicHint: string
   learnerProfile: LearnerVocabularyProfile
+}
+
+export interface NewWord {
+  simplified: string
+  pinyin: string
+  english: string
 }
 
 export interface GenerationResult {
   chinese: string
-  newWords: {
-    simplified: string
-    pinyin: string
-    english: string
-  }[]
+  newWords: NewWord[]
+}
+
+export interface SavedGenerationConfig {
+  paragraphLength: ParagraphLength
+  studyMode: StudyMode
+}
+
+export interface TranslationFeedback {
+  summary: string
+  strengths: string[]
+  improvements: string[]
+  newWordNotes: string[]
+}
+
+export interface TranslationAttemptRecord {
+  id: string
+  createdAt: string
+  userTranslation: string
+  referenceTranslation: string
+  feedback: TranslationFeedback | null
+}
+
+export interface PracticeHistoryEntry {
+  id: string
+  createdAt: string
+  updatedAt: string
+  chinese: string
+  newWords: NewWord[]
+  config: SavedGenerationConfig
+  translationAttempts: TranslationAttemptRecord[]
+  retainedWords: string[]
+}
+
+export interface TranslationFeedbackRequest {
+  chinese: string
+  userTranslation: string
+  newWords: NewWord[]
 }

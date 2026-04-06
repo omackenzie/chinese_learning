@@ -28,6 +28,13 @@ const mobileMenuOpen = ref(false)
             >
               Word List
             </router-link>
+            <router-link
+              to="/history"
+              class="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors rounded-md px-3 py-1.5"
+              active-class="!bg-red-50 !text-red-700"
+            >
+              History
+            </router-link>
           </nav>
         </div>
         <div class="flex items-center gap-3">
@@ -71,6 +78,14 @@ const mobileMenuOpen = ref(false)
           active-class="!bg-red-50 !text-red-700"
         >
           Word List
+        </router-link>
+        <router-link
+          to="/history"
+          @click="mobileMenuOpen = false"
+          class="block text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors rounded-md px-3 py-2"
+          active-class="!bg-red-50 !text-red-700"
+        >
+          History
         </router-link>
       </nav>
     </header>

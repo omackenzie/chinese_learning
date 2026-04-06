@@ -1,4 +1,8 @@
-import type { GenerateParagraphRequest } from '../types'
+import type {
+  GenerateParagraphRequest,
+  TranslationFeedback,
+  TranslationFeedbackRequest,
+} from '../types'
 
 function parseSSEData(data: string): string | never {
   try {
@@ -65,6 +69,29 @@ async function parseErrorResponse(response: Response): Promise<string> {
   }
 }
 
+async function postJson<TResponse>(
+  url: string,
+  body: unknown,
+): Promise<TResponse> {
+  let response: Response
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new Error('Could not connect to the server. Is the backend running?')
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response))
+  }
+
+  return response.json() as Promise<TResponse>
+}
+
 export async function* generateParagraph(
   params: GenerateParagraphRequest,
 ): AsyncGenerator<string> {
@@ -103,4 +130,10 @@ export async function* getTranslation(chinese: string): AsyncGenerator<string> {
   }
 
   yield* readSSEStream(response)
+}
+
+export function getTranslationFeedback(
+  params: TranslationFeedbackRequest,
+): Promise<TranslationFeedback> {
+  return postJson<TranslationFeedback>('/api/translation-feedback', params)
 }
